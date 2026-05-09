@@ -1,0 +1,20 @@
+S3 layout after deployment
+
+RawMediaBucket
+└── uploads/
+    └── uploaded files
+
+IntermediateBucket
+└── items/{uuid}/
+    ├── prepared.json
+    ├── image_rekognition.json
+    ├── video_rekognition.json
+    └── comprehend_analysis.json
+
+TranscriptBucket
+└── items/{uuid}/
+    └── transcript.json
+
+FinalResultsBucket
+└── items/{uuid}/
+    └── final_result.json

@@ -1,0 +1,16 @@
+flowchart TD
+  Upload[User Uploads Image / Video / Audio] --> Raw[S3 RawMediaBucket]
+  Raw --> Dispatcher[Lambda Dispatcher]
+  Dispatcher --> SFN[Step Functions Workflow]
+  SFN --> Prep[Prepare Metadata]
+  SFN --> RekImg[Rekognition Image Labels + Faces]
+  SFN --> RekVid[Rekognition Video Label Detection]
+  SFN --> Transcribe[Amazon Transcribe]
+  SFN --> Comprehend[Amazon Comprehend NLP]
+  RekImg --> Inter[S3 Intermediate JSON]
+  RekVid --> Inter
+  Transcribe --> Transcript[S3 Transcript JSON]
+  Comprehend --> Inter
+  SFN --> Finalize[Aggregate + Safe Review Flags]
+  Finalize --> Final[S3 Final Results]
+  Finalize --> DDB[DynamoDB Metadata Index]

@@ -1,0 +1,375 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Small-scale AWS media intelligence pipeline for labels, transcripts, NLP, and safe human-review risk flags.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: media-intel-small
+    AllowedPattern: "^[a-zA-Z0-9-]+$"
+  LambdaCodeBucket:
+    Type: String
+    Description: S3 bucket containing Lambda deployment zips.
+  DispatcherCodeKey:
+    Type: String
+    Description: S3 key for dispatcher Lambda zip.
+  ProcessorCodeKey:
+    Type: String
+    Description: S3 key for processor Lambda zip.
+  LanguageCode:
+    Type: String
+    Default: en-US
+    Description: Amazon Transcribe language code.
+
+Resources:
+  RawMediaBucket:
+    Type: AWS::S3::Bucket
+    DependsOn:
+      - DispatcherInvokePermission
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt DispatcherFunction.Arn
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  IntermediateBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  TranscriptBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  FinalResultsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  MetadataTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: ItemId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: ItemId
+          KeyType: HASH
+
+  DispatcherRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: dispatcher-policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !Ref MediaStateMachine
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  ProcessorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: processor-policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rekognition:DetectLabels
+                  - rekognition:DetectFaces
+                  - rekognition:StartLabelDetection
+                  - rekognition:GetLabelDetection
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - transcribe:StartTranscriptionJob
+                  - transcribe:GetTranscriptionJob
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - comprehend:DetectSentiment
+                  - comprehend:DetectKeyPhrases
+                  - comprehend:DetectEntities
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "${RawMediaBucket.Arn}"
+                  - !Sub "${RawMediaBucket.Arn}/*"
+                  - !Sub "${IntermediateBucket.Arn}"
+                  - !Sub "${IntermediateBucket.Arn}/*"
+                  - !Sub "${TranscriptBucket.Arn}"
+                  - !Sub "${TranscriptBucket.Arn}/*"
+                  - !Sub "${FinalResultsBucket.Arn}"
+                  - !Sub "${FinalResultsBucket.Arn}/*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !GetAtt MetadataTable.Arn
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  StateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: states.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: invoke-processor
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt ProcessorFunction.Arn
+
+  ProcessorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-processor"
+      Runtime: python3.11
+      Handler: processor.handler
+      Role: !GetAtt ProcessorRole.Arn
+      Timeout: 120
+      MemorySize: 512
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref ProcessorCodeKey
+      Environment:
+        Variables:
+          RAW_BUCKET: !Ref RawMediaBucket
+          INTERMEDIATE_BUCKET: !Ref IntermediateBucket
+          TRANSCRIPT_BUCKET: !Ref TranscriptBucket
+          FINAL_BUCKET: !Ref FinalResultsBucket
+          TABLE_NAME: !Ref MetadataTable
+          LANGUAGE_CODE: !Ref LanguageCode
+
+  DispatcherFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-dispatcher"
+      Runtime: python3.11
+      Handler: dispatcher.handler
+      Role: !GetAtt DispatcherRole.Arn
+      Timeout: 30
+      MemorySize: 128
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref DispatcherCodeKey
+      Environment:
+        Variables:
+          STATE_MACHINE_ARN: !Ref MediaStateMachine
+
+  DispatcherInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DispatcherFunction
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+
+  MediaStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub "${ProjectName}-workflow"
+      RoleArn: !GetAtt StateMachineRole.Arn
+      Definition:
+        Comment: Small-scale media intelligence workflow
+        StartAt: Prepare
+        States:
+          Prepare:
+            Type: Task
+            Resource: !GetAtt ProcessorFunction.Arn
+            Parameters:
+              task: prepare
+              bucket.$: $.bucket
+              key.$: $.key
+              size.$: $.size
+              source_event.$: $.source_event
+            Next: AnalyzeImage
+          AnalyzeImage:
+            Type: Task
+            Resource: !GetAtt ProcessorFunction.Arn
+            Parameters:
+              task: analyze_image
+              bucket.$: $.bucket
+              key.$: $.key
+              size.$: $.size
+              source_event.$: $.source_event
+              item_id.$: $.item_id
+              media_type.$: $.media_type
+              prefix.$: $.prefix
+              created_epoch.$: $.created_epoch
+            Next: StartVideoLabels
+          StartVideoLabels:
+            Type: Task
+            Resource: !GetAtt ProcessorFunction.Arn
+            Parameters:
+              task: start_video_label_detection
+              bucket.$: $.bucket
+              key.$: $.key
+              size.$: $.size
+              source_event.$: $.source_event
+              item_id.$: $.item_id
+              media_type.$: $.media_type
+              prefix.$: $.prefix
+              created_epoch.$: $.created_epoch
+              image_analysis.$: $.image_analysis
+            Next: WaitVideoLabels
+          WaitVideoLabels:
+            Type: Wait
+            Seconds: 20
+            Next: CheckVideoLabels
+          CheckVideoLabels:
+            Type: Task
+            Resource: !GetAtt ProcessorFunction.Arn
+            Next: VideoLabelsCompleteChoice
+          VideoLabelsCompleteChoice:
+            Type: Choice
+            Choices:
+              - Variable: $.video_label_job.status
+                StringEquals: STARTED
+                Next: WaitVideoLabels
+              - Variable: $.video_label_job.status
+                StringEquals: IN_PROGRESS
+                Next: WaitVideoLabels
+            Default: StartTranscription
+          StartTranscription:
+            Type: Task
+            Resource: !GetAtt ProcessorFunction.Arn
+            Parameters:
+              task: start_transcription
+              bucket.$: $.bucket
+              key.$: $.key
+              size.$: $.size
+              source_event.$: $.source_event
+              item_id.$: $.item_id
+              media_type.$: $.media_type
+              prefix.$: $.prefix
+              created_epoch.$: $.created_epoch
+              image_analysis.$: $.image_analysis
+              video_label_job.$: $.video_label_job
+              video_analysis.$: $.video_analysis
+            Next: WaitTranscription
+          WaitTranscription:
+            Type: Wait
+            Seconds: 20
+            Next: CheckTranscription
+          CheckTranscription:
+            Type: Task
+            Resource: !GetAtt ProcessorFunction.Arn
+            Next: TranscriptionCompleteChoice
+          TranscriptionCompleteChoice:
+            Type: Choice
+            Choices:
+              - Variable: $.transcription_job.status
+                StringEquals: STARTED
+                Next: WaitTranscription
+              - Variable: $.transcription_job.status
+                StringEquals: IN_PROGRESS
+                Next: WaitTranscription
+            Default: AnalyzeText
+          AnalyzeText:
+            Type: Task
+            Resource: !GetAtt ProcessorFunction.Arn
+            Parameters:
+              task: analyze_text
+              bucket.$: $.bucket
+              key.$: $.key
+              item_id.$: $.item_id
+              media_type.$: $.media_type
+              prefix.$: $.prefix
+              created_epoch.$: $.created_epoch
+              image_analysis.$: $.image_analysis
+              video_label_job.$: $.video_label_job
+              video_analysis.$: $.video_analysis
+              transcription_job.$: $.transcription_job
+              transcript.$: $.transcript
+            Next: Aggregate
+          Aggregate:
+            Type: Task
+            Resource: !GetAtt ProcessorFunction.Arn
+            End: true
+
+Outputs:
+  RawMediaBucket:
+    Value: !Ref RawMediaBucket
+  IntermediateBucket:
+    Value: !Ref IntermediateBucket
+  TranscriptBucket:
+    Value: !Ref TranscriptBucket
+  FinalResultsBucket:
+    Value: !Ref FinalResultsBucket
+  MetadataTable:
+    Value: !Ref MetadataTable
+  StateMachineArn:
+    Value: !Ref MediaStateMachine
