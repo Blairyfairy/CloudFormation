@@ -1,0 +1,379 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Small-scale Cloud Media Intelligence Platform with PayPal, S3 uploads, Lambda, Step Functions, Rekognition, Transcribe, Comprehend scaffold.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: cloud-media-intel
+  PayPalClientId:
+    Type: String
+    NoEcho: true
+  PayPalClientSecret:
+    Type: String
+    NoEcho: true
+  PayPalMode:
+    Type: String
+    Default: sandbox
+    AllowedValues: [sandbox, live]
+  PaymentReceiverEmail:
+    Type: String
+    Default: blarghtrill@gmail.com
+  DeploymentBucketName:
+    Type: String
+    Description: S3 bucket containing lambda zip artifacts
+  CorsOrigin:
+    Type: String
+    Default: "*"
+
+Resources:
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: PublicReadStaticSite
+            Effect: Allow
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Sub "${FrontendBucket.Arn}/*"
+
+  RawBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ["*"]
+            AllowedMethods: [PUT, POST, GET, HEAD]
+            AllowedOrigins: ["*"]
+            MaxAge: 3600
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  ResultsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  JobsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: jobId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: jobId
+          KeyType: HASH
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AppLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+                Resource: "*"
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
+                Resource: !GetAtt JobsTable.Arn
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject]
+                Resource:
+                  - !Sub "${RawBucket.Arn}/*"
+                  - !Sub "${ResultsBucket.Arn}/*"
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource:
+                  - !GetAtt RawBucket.Arn
+                  - !GetAtt ResultsBucket.Arn
+              - Effect: Allow
+                Action: [states:StartExecution]
+                Resource: !Ref MediaStateMachine
+              - Effect: Allow
+                Action:
+                  - rekognition:DetectLabels
+                  - rekognition:DetectFaces
+                  - comprehend:DetectSentiment
+                  - comprehend:DetectKeyPhrases
+                  - transcribe:StartTranscriptionJob
+                  - transcribe:GetTranscriptionJob
+                  - mediaconvert:CreateJob
+                Resource: "*"
+
+  StepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: states.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeProcessor
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt ProcessMediaFunction.Arn
+
+  CreateOrderFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: app.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 30
+      Code: { S3Bucket: !Ref DeploymentBucketName, S3Key: create_order.zip }
+      Environment:
+        Variables:
+          JOBS_TABLE: !Ref JobsTable
+          PAYPAL_CLIENT_ID: !Ref PayPalClientId
+          PAYPAL_CLIENT_SECRET: !Ref PayPalClientSecret
+          PAYPAL_MODE: !Ref PayPalMode
+          PAYMENT_RECEIVER_EMAIL: !Ref PaymentReceiverEmail
+          CORS_ORIGIN: !Ref CorsOrigin
+
+  CaptureOrderFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: app.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 30
+      Code: { S3Bucket: !Ref DeploymentBucketName, S3Key: capture_order.zip }
+      Environment:
+        Variables:
+          JOBS_TABLE: !Ref JobsTable
+          PAYPAL_CLIENT_ID: !Ref PayPalClientId
+          PAYPAL_CLIENT_SECRET: !Ref PayPalClientSecret
+          PAYPAL_MODE: !Ref PayPalMode
+          PAYMENT_RECEIVER_EMAIL: !Ref PaymentReceiverEmail
+          CORS_ORIGIN: !Ref CorsOrigin
+
+  CreateUploadUrlFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: app.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 20
+      Code: { S3Bucket: !Ref DeploymentBucketName, S3Key: create_upload_url.zip }
+      Environment:
+        Variables:
+          JOBS_TABLE: !Ref JobsTable
+          RAW_BUCKET: !Ref RawBucket
+          CORS_ORIGIN: !Ref CorsOrigin
+
+  StartProcessingFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: app.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 20
+      Code: { S3Bucket: !Ref DeploymentBucketName, S3Key: start_processing.zip }
+      Environment:
+        Variables:
+          JOBS_TABLE: !Ref JobsTable
+          RAW_BUCKET: !Ref RawBucket
+          RESULTS_BUCKET: !Ref ResultsBucket
+          STATE_MACHINE_ARN: !Ref MediaStateMachine
+          CORS_ORIGIN: !Ref CorsOrigin
+
+  GetJobFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: app.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 10
+      Code: { S3Bucket: !Ref DeploymentBucketName, S3Key: get_job.zip }
+      Environment:
+        Variables:
+          JOBS_TABLE: !Ref JobsTable
+          CORS_ORIGIN: !Ref CorsOrigin
+
+  ProcessMediaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: app.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 120
+      MemorySize: 512
+      Code: { S3Bucket: !Ref DeploymentBucketName, S3Key: process_media.zip }
+      Environment:
+        Variables:
+          JOBS_TABLE: !Ref JobsTable
+          CORS_ORIGIN: !Ref CorsOrigin
+
+  MediaStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      RoleArn: !GetAtt StepFunctionsRole.Arn
+      DefinitionString: !Sub |
+        {
+          "Comment": "Small-scale media intelligence workflow",
+          "StartAt": "ProcessMedia",
+          "States": {
+            "ProcessMedia": {
+              "Type": "Task",
+              "Resource": "${ProcessMediaFunction.Arn}",
+              "End": true
+            }
+          }
+        }
+
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub "${ProjectName}-api"
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowOrigins: [!Ref CorsOrigin]
+        AllowMethods: [GET, POST, OPTIONS]
+        AllowHeaders: [content-type, authorization]
+
+  ApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: "$default"
+      AutoDeploy: true
+
+  CreateOrderIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt CreateOrderFunction.Arn
+      PayloadFormatVersion: "2.0"
+
+  CaptureOrderIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt CaptureOrderFunction.Arn
+      PayloadFormatVersion: "2.0"
+
+  UploadUrlIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt CreateUploadUrlFunction.Arn
+      PayloadFormatVersion: "2.0"
+
+  StartProcessingIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt StartProcessingFunction.Arn
+      PayloadFormatVersion: "2.0"
+
+  GetJobIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt GetJobFunction.Arn
+      PayloadFormatVersion: "2.0"
+
+  OrdersRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "POST /orders"
+      Target: !Sub "integrations/${CreateOrderIntegration}"
+
+  CaptureRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "POST /orders/capture"
+      Target: !Sub "integrations/${CaptureOrderIntegration}"
+
+  UploadRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "POST /upload-url"
+      Target: !Sub "integrations/${UploadUrlIntegration}"
+
+  StartRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "POST /jobs/start"
+      Target: !Sub "integrations/${StartProcessingIntegration}"
+
+  GetJobRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "GET /jobs/{jobId}"
+      Target: !Sub "integrations/${GetJobIntegration}"
+
+  CreateOrderPermission:
+    Type: AWS::Lambda::Permission
+    Properties: { Action: lambda:InvokeFunction, FunctionName: !Ref CreateOrderFunction, Principal: apigateway.amazonaws.com, SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*/*" }
+  CaptureOrderPermission:
+    Type: AWS::Lambda::Permission
+    Properties: { Action: lambda:InvokeFunction, FunctionName: !Ref CaptureOrderFunction, Principal: apigateway.amazonaws.com, SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*/*" }
+  UploadUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties: { Action: lambda:InvokeFunction, FunctionName: !Ref CreateUploadUrlFunction, Principal: apigateway.amazonaws.com, SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*/*" }
+  StartProcessingPermission:
+    Type: AWS::Lambda::Permission
+    Properties: { Action: lambda:InvokeFunction, FunctionName: !Ref StartProcessingFunction, Principal: apigateway.amazonaws.com, SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*/*" }
+  GetJobPermission:
+    Type: AWS::Lambda::Permission
+    Properties: { Action: lambda:InvokeFunction, FunctionName: !Ref GetJobFunction, Principal: apigateway.amazonaws.com, SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*/*" }
+
+Outputs:
+  ApiBaseUrl:
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+  FrontendBucketName:
+    Value: !Ref FrontendBucket
+  FrontendWebsiteUrl:
+    Value: !GetAtt FrontendBucket.WebsiteURL
+  RawBucketName:
+    Value: !Ref RawBucket
+  ResultsBucketName:
+    Value: !Ref ResultsBucket
+  JobsTableName:
+    Value: !Ref JobsTable

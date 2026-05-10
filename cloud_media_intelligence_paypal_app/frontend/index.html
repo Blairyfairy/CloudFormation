@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Cloud Media Intelligence Platform</title>
+  <link rel="stylesheet" href="styles.css"/>
+  <script src="config.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", function() {
+      const script = document.createElement("script");
+      script.src = "https://www.paypal.com/sdk/js?client-id=" + encodeURIComponent(window.APP_CONFIG.PAYPAL_CLIENT_ID) + "&currency=" + encodeURIComponent(window.APP_CONFIG.CURRENCY || "USD");
+      script.onload = () => window.initPayPalButtons && window.initPayPalButtons();
+      document.head.appendChild(script);
+    });
+  </script>
+</head>
+<body>
+  <header class="hero">
+    <nav>
+      <div class="brand">Cloud Media Intelligence</div>
+      <a href="#pricing">Pricing</a>
+      <a href="#upload">Upload</a>
+      <a href="#architecture">Architecture</a>
+    </nav>
+    <section class="hero-grid">
+      <div>
+        <p class="eyebrow">AWS CloudFormation + PayPal + AI Media Processing</p>
+        <h1>Upload images and videos. Pay by package. Get AI labels, transcripts, and searchable metadata.</h1>
+        <p class="sub">A small-scale SaaS proof-of-concept for creators, researchers, startups, agencies, and developers who need quick cloud-based media intelligence without enterprise overhead.</p>
+        <div class="cta-row">
+          <a class="btn primary" href="#pricing">Choose a Plan</a>
+          <a class="btn secondary" href="#architecture">View Architecture</a>
+        </div>
+      </div>
+      <div class="glass-card">
+        <h3>Outputs Stored in S3</h3>
+        <ul>
+          <li>Image and video labels</li>
+          <li>Transcripts and captions</li>
+          <li>Sentiment and key phrases</li>
+          <li>Thumbnails and transcoded files</li>
+          <li>JSON metadata and confidence scores</li>
+          <li>Human-review risk indicators</li>
+        </ul>
+      </div>
+    </section>
+  </header>
+
+  <main>
+    <section id="pricing" class="section">
+      <h2>Simple Pay-As-You-Process Packages</h2>
+      <p class="section-lead">Pricing is estimated for small-scale usage and includes a margin for AWS processing, storage, support, and platform overhead.</p>
+      <div class="pricing-grid" id="plans"></div>
+    </section>
+
+    <section id="upload" class="section split">
+      <div>
+        <h2>Upload After Payment</h2>
+        <p>Choose a package, complete PayPal checkout, then upload supported image and video files. The backend creates secure S3 upload URLs and starts the media intelligence workflow.</p>
+        <div class="notice">
+          <strong>Safety language:</strong> This app reports labels, speech sentiment, repeated phrases, and review indicators. It does not claim to prove someone is lying, high, guilty, or truthful.
+        </div>
+      </div>
+      <form id="uploadForm" class="panel">
+        <label>Job ID from successful payment</label>
+        <input id="jobId" placeholder="job_..." required />
+        <label>Select files</label>
+        <input id="files" type="file" multiple accept="image/*,video/*,audio/*" required />
+        <button type="submit" class="btn primary full">Upload & Start Processing</button>
+        <pre id="uploadStatus"></pre>
+      </form>
+    </section>
+
+    <section id="results" class="section split">
+      <div>
+        <h2>Check Job Status</h2>
+        <p>Enter a job ID to check current status and view result object paths.</p>
+      </div>
+      <div class="panel">
+        <input id="lookupJobId" placeholder="job_..." />
+        <button id="lookupBtn" class="btn secondary full">Check Status</button>
+        <pre id="jobStatus"></pre>
+      </div>
+    </section>
+
+    <section id="architecture" class="section">
+      <h2>Architecture Summary</h2>
+      <div class="arch-grid">
+        <div class="arch-box">Frontend<br><span>S3 Static Hosting</span></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-box">API<br><span>API Gateway + Lambda</span></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-box">Payment<br><span>PayPal Orders API</span></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-box">Upload<br><span>S3 Presigned URLs</span></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-box">AI Pipeline<br><span>Step Functions</span></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-box">Results<br><span>S3 + DynamoDB</span></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Contact / Payments: <strong>blarghtrill@gmail.com</strong> · Powered by AWS CloudFormation</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

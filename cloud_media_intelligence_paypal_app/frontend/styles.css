@@ -1,0 +1,61 @@
+:root {
+  --bg: #071226;
+  --panel: rgba(255,255,255,.09);
+  --panel2: rgba(255,255,255,.13);
+  --text: #f8fbff;
+  --muted: #b9c8df;
+  --blue: #42a5ff;
+  --purple: #8757ff;
+  --green: #18d17b;
+  --border: rgba(255,255,255,.18);
+  --shadow: 0 24px 80px rgba(0,0,0,.35);
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: Inter, Segoe UI, system-ui, sans-serif; background: radial-gradient(circle at 20% 0%, #18325f, var(--bg) 42%, #030712); color: var(--text); }
+a { color: inherit; text-decoration: none; }
+nav { display:flex; gap: 22px; align-items:center; padding: 22px 5vw; }
+nav .brand { margin-right:auto; font-weight: 900; letter-spacing: .02em; }
+nav a { color: var(--muted); font-weight: 700; }
+.hero { min-height: 78vh; position: relative; overflow: hidden; }
+.hero:before { content:""; position:absolute; inset:-20%; background: radial-gradient(circle at 85% 25%, rgba(135,87,255,.36), transparent 28%), radial-gradient(circle at 70% 85%, rgba(66,165,255,.25), transparent 30%); pointer-events:none; }
+.hero-grid { position:relative; display:grid; grid-template-columns: 1.25fr .75fr; gap: 42px; align-items:center; padding: 70px 5vw 90px; }
+.eyebrow { color: #8bd8ff; text-transform: uppercase; letter-spacing: .18em; font-weight: 900; font-size: .78rem; }
+h1 { font-size: clamp(2.4rem, 6vw, 5.6rem); line-height: .94; margin: 0 0 24px; letter-spacing: -.06em; }
+h2 { font-size: clamp(2rem, 4vw, 3.6rem); margin: 0 0 14px; letter-spacing: -.04em; }
+.sub, .section-lead, p { color: var(--muted); font-size: 1.05rem; line-height: 1.65; }
+.cta-row { display:flex; flex-wrap:wrap; gap: 14px; margin-top: 28px; }
+.btn { border: 1px solid var(--border); padding: 13px 18px; border-radius: 999px; font-weight: 900; cursor: pointer; display:inline-flex; justify-content:center; transition: .2s; }
+.btn:hover { transform: translateY(-2px); }
+.primary { background: linear-gradient(135deg, var(--blue), var(--purple)); color:white; border:0; }
+.secondary { background: rgba(255,255,255,.08); color:white; }
+.full { width: 100%; border-radius: 14px; }
+.glass-card, .panel, .plan-card, .arch-box { background: linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,.07)); border: 1px solid var(--border); border-radius: 28px; padding: 26px; box-shadow: var(--shadow); backdrop-filter: blur(16px); }
+.glass-card ul { padding-left: 20px; color: var(--muted); line-height: 1.9; }
+.section { padding: 70px 5vw; }
+.pricing-grid { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 20px; margin-top: 28px; }
+.plan-card { display:flex; flex-direction:column; gap: 14px; }
+.plan-card.featured { outline: 2px solid rgba(66,165,255,.65); }
+.plan-card h3 { margin: 0; font-size: 1.45rem; }
+.price { font-size: 2.2rem; font-weight: 950; }
+.plan-card ul { color: var(--muted); line-height: 1.7; padding-left: 18px; min-height: 175px; }
+.paypal-slot { min-height: 48px; margin-top:auto; }
+.split { display:grid; grid-template-columns: .85fr 1.15fr; gap: 32px; align-items:start; }
+.notice { background: rgba(24,209,123,.11); border: 1px solid rgba(24,209,123,.35); color: #dfffee; border-radius: 20px; padding: 18px; line-height: 1.6; }
+label { display:block; margin: 14px 0 7px; color:#dfeaff; font-weight: 800; }
+input { width:100%; background: rgba(0,0,0,.25); color:white; border: 1px solid var(--border); border-radius: 14px; padding: 14px; }
+pre { white-space: pre-wrap; background: rgba(0,0,0,.28); border:1px solid var(--border); border-radius: 14px; padding: 14px; color:#d7e7ff; min-height: 88px; overflow:auto; }
+.arch-grid { display:grid; grid-template-columns: repeat(6, 1fr); gap: 12px; align-items:center; margin-top: 24px; }
+.arch-box { text-align:center; font-weight: 950; min-height: 120px; display:flex; flex-direction:column; justify-content:center; }
+.arch-box span { color: var(--muted); font-weight: 700; font-size:.9rem; margin-top: 6px; }
+.arch-arrow { text-align:center; color: var(--blue); font-size: 2rem; display:none; }
+footer { padding: 30px 5vw; border-top: 1px solid var(--border); color: var(--muted); }
+@media (max-width: 1100px) {
+  .pricing-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .arch-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 760px) {
+  .hero-grid, .split { grid-template-columns: 1fr; }
+  .pricing-grid { grid-template-columns: 1fr; }
+  nav { flex-wrap:wrap; }
+  h1 { font-size: 2.65rem; }
+}
